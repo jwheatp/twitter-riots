@@ -3,7 +3,7 @@ import sys
 import math
 import re
 
-r = redis.StrictRedis(host='localhost', port=6379, db=0)
+r = redis.StrictRedis(host='localhost', port=6379, db=1)
 
 r.flushdb()
 
@@ -21,13 +21,10 @@ with open(filepath) as f:
       
       if len(tweet) == 0 :
         print(k)
-      key = tweet[0]
+      key = tweet[2].lower()
+      value = tweet[0] 
 
-      tweet.pop(0)
-      tweet = ['"%s"' % t for t in tweet]
-      tweet = '%s' % ','.join(tweet)
-      
-      r.set(key,tweet)
+      r.set(key,value)
 
       k = k + 1
 

@@ -1,67 +1,105 @@
 import redis
+import community
 import networkx as nx
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import re
 import math
 import sys
 import itertools
+import random
 from operator import itemgetter
 
-def addToGraph(tags) :
+def addToGraph(tags,user) :
   global G, keywords
 
   tags = [t.lower() for t in tags]
 
-  for tag in tags :
-    G.add_node(tag.lower())
+  username = user[1].lower()
+  G.add_node(username)
 
-  for perms in itertools.permutations(tags,2) :
-    a = perms[0]
-    b = perms[1]
-    if G.has_edge(a, b) :
-      G[a][b]['weight'] += 1
-    else :
-      G.add_edge(a, b, weight=1)
+  for tag in tags :
+    if rt.exists(tag) :
+      G.add_node(tag)
+      if G.has_edge(username, tag) :
+        G[username][tag]['weight'] += 1
+      else :
+        G.add_edge(username, tag, weight=1)
 
 G = nx.Graph()
 
 filepath = str(sys.argv[1])
+output = str(sys.argv[2])
 
 r = redis.StrictRedis(host='localhost', port=6379, db=0)
-
+rt = redis.StrictRedis(host='localhost', port=6379, db=1)
 k = 0
 
 with open(filepath) as f:
     for tweet in f:
-        if k < 1000000 :
-          if math.fmod(k,100000) == 0 :
-            print(k)
-          tweet = re.findall('"((?:(?!(?:",")).)*)"', tweet)
-          mentions = tweet[10].split(",")
-          if len(mentions) > 0 and mentions[0] != "" :
-            # addToGraph(mentions)
-            print(tweet[2])
-            print(r.get(tweet[2]))
-          k = k + 1
+      if math.fmod(k,100000) == 0 :
+        print(k)
+      tweet = re.findall('"((?:(?!(?:",")).)*)"', tweet)
+      mentions = tweet[11].split(",")
+      if len(mentions) > 0 and mentions[0] != "" :
+        user = r.get(tweet[2])
+        if user != None :
+          user = re.findall('"((?:(?!(?:",")).)*)"',r.get(tweet[2]))
+          addToGraph(mentions,user)
+      k = k + 1
 
-top_edges_names = []
 
-limit = 100
+#print("iteration done..")
 
-top_edges = sorted(G.edges(data = True), key = lambda (a, b, dct): dct['weight'],reverse=True)[:limit]
+#def getColor() :
+#  r = lambda: random.randint(0,255)
+#  return '#%02X%02X%02X' % (r(),r(),r())
 
-for a, b, dct in top_edges :
-    top_edges_names.append((a,b))
+#first compute the best partition
+partition = community.best_partition(G)
 
-T = nx.Graph(top_edges_names)
+v = {}
 
-sizes = []
-for n in T.nodes() :
-  sizes.append(sum([item[2]["weight"]/10 for item in top_edges if n in item]))
+for key, value in sorted(partition.iteritems()):
+    v.setdefault(value, []).append(key)
 
-dt = nx.degree(G)
+vs = sorted(v, key=lambda k: len(v[k]), reverse=True)[:10]
+v = dict(filter(lambda i:i[0] in vs, v.iteritems()))
+for key in v :
+  degrees = nx.degree(G,set(v[key]))
+  degrees = sorted(degrees, key=degrees.get, reverse=True)[:100]
+  v[key] = degrees
 
-colors=range(limit)
-nx.draw(T, edges = T.edges(),edge_color=colors,width=2,edge_cmap=plt.cm.Reds, node_size=sizes, with_labels=True,alpha=0.2,weights = [G[p[0]][p[1]]['weight'] for p in top_edges_names],font_size=6)
 
-plt.savefig("graph.pdf")
+i = 0
+for k in v :
+  i = i + 1
+  out = "comm_%s" % i
+  print(out)
+  output = open(out,'a')
+  for w in v[k] :
+    output.write("%s\n" % rt.get(w))
+
+#drawing
+#size = float(len(set(partition.values())))
+
+#print("now create layout..")
+#kk = set([j for i in v.values() for j in i])
+#H = G.subgraph(kk)
+
+#pos = nx.spring_layout(H)
+#pos = nx.graphviz_layout(H,"sfdp")
+
+#print("layout done !")
+
+#d = nx.degree(G)
+
+#edges = sorted(H.edges(data = True), key = lambda (a, b, dct): dct['weight'],reverse=True)[:100]
+
+#for part in v :
+#    nx.draw_networkx_nodes(H,pos,v[part], node_size=[o*2 for o in d.values()], node_color = str(getColor()),linewidths=0)
+
+#nx.draw_networkx_edges(H,pos,edgelist=edges, alpha=0.2)
+
+#plt.savefig("graph.png",dpi=200)
