@@ -1,3 +1,10 @@
+"""Hydration from tweets ids to csv file
+
+MIT License (MIT)
+
+Copyright (c) 2015 Julien BLEGEAN <julien.blegean@aalto.fi>
+"""
+
 # imports
 from twarc import Twarc
 from datetime import datetime
@@ -6,14 +13,20 @@ import math
 import sys
 import csv
 
+
+
 def addTweet(tweet) :
+  """ Process a tweet id and write the content in a csv file
+  :params tweet : the tweet id
+  """
   global i,outfile
   i = i + 1
 
+  # show every 100 tweets processed
   if math.fmod(i,100) == 0 :
     print(i)
 
-  # tweets fields
+  # FIELDS
 
   # id
   t_id = '"%s"' % tweet["id_str"].encode("ASCII",'ignore')
@@ -65,6 +78,7 @@ def addTweet(tweet) :
 
   ht = ' '.join(ht_list)
   ht = '"%s"' % ht
+
   # urls
   url_list = []
   if entities.has_key("urls") :
@@ -74,6 +88,7 @@ def addTweet(tweet) :
 
   url_l = ' '.join(url_list)
   url_l = '"%s"' % url_l
+
   # medias
   media_list = []
   if entities.has_key("media") :
@@ -82,6 +97,7 @@ def addTweet(tweet) :
 
   medias_l = ' '.join(media_list)
   medias_l = '"%s"' % medias_l
+
   # source
   source = tweet["source"].encode("ASCII", "ignore")
   source = json.dumps(source)
@@ -108,18 +124,23 @@ def addTweet(tweet) :
   twt = [t_id,created_at,author,text,is_reply,in_reply_to,in_reply_to_u,retweet_count,favorite_count,ht,url_l,medias_l,lang,source,geo,lon,lat]
   twts = '%s\n' % ','.join(twt)
 
+  # write to file
   with open(outpath, "a") as file:
     file.write(twts)
 
+# create Twarc instance to fetch from Twitter's API
 t = Twarc()
 
-# counter
+# tweet counter
 i = 0
 
+# filepath from argument
 filepath = str(sys.argv[1])
 
+# outpath filename
 outpath = "%s_h" % filepath
 
 # iterate tweets
 for tweet in t.hydrate(open(filepath)):
+  # process tweet id
   addTweet(tweet)

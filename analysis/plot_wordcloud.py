@@ -30,7 +30,7 @@ for filename in glob.glob(path):
         tokens = [x for x in tokens if x != "ferguson"]
         temp.extend(tokens)
         k = k + 1
-  words[i] = Counter(temp).most_common(20)
+  words[i] = Counter(temp).most_common(100)
   sets[i] = set([x[0] for x in words[i]])
 
 print(words)
