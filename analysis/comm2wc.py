@@ -1,15 +1,20 @@
+"""Find hashtags communities from tweets
+
+MIT License (MIT)
+
+Copyright (c) 2015 Julien BLEGEAN <julien.blegean@aalto.fi>
+"""
 import os
 import glob
 import sys
 
+# input tweets path
 tweets = str(sys.argv[1])
-
-print("-------------------------------------")
-print(" Word Cloud from Hashtag Communities")
-print("-------------------------------------")
 
 print("")
 print("1) Compute hashtag graph and find user communities")
+
+# 
 os.system("python hashtags.py %s" % tweets)
 os.system("mv tcomm_* communities")
 print("2) Group tweets")

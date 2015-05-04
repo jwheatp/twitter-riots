@@ -34,20 +34,37 @@ from gensim import corpora, models, matutils
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn import feature_extraction
 from sklearn.cluster import DBSCAN
-import re 
+import re
 
 def clusterize(tweets) :
   #transformer = TfidfTransformer()
   #tfidf = transformer.fit_transform(np.array(tweets.values()))
 
-  if "-lda" in sys.argv : 
+  if "-lda" in sys.argv :
     tfidf = models.tfidfmodel.TfidfModel(tweets.values())
     corpus = tfidf[tweets.values()]
+    corpus = tweets.values()
     lda = models.ldamodel.LdaModel(corpus=corpus, id2word = dicog,num_topics=5)
     topics = lda.print_topics(5, 10)
-    for topic in topics : 
+    for topic in topics :
       topic = re.sub(r'([0-9\.]*)\*','', topic)
       print(topic)
+    f = open('topiclusters_11','w')
+    counters = {}
+    for key,vec in tweets.items() :
+      topd = lda[tfidf[vec]]
+      topd = sorted(topd,key=lambda x: x[1], reverse=True)
+      topd = topd[0][0]
+      uid = t2u[key]
+      if uid not in counters :
+        counters[uid] = Counter()
+      counters[uid][topd] += 1
+    for user in counters :
+      mc = counters[user].most_common()
+      mc = int(mc[0][0])
+      out = '%s,%s\n' % (user,mc)
+      f.write(out)
+
 
   if "-lsi" in sys.argv :
     tfidf = models.tfidfmodel.TfidfModel(tweets.values())
@@ -58,7 +75,7 @@ def clusterize(tweets) :
       topic = re.sub(r'([0-9\.]*)\*','', topic)
       print(topic)
 
- 
+
 #    model = lda.LDA(n_topics=5, n_iter=500, random_state=1)
 #    model.fit(tfidf.toarray())
 #    topic_word = model.topic_word_  # model.components_ also works
@@ -75,12 +92,12 @@ def clusterize(tweets) :
     print(len(labels))
 
     clusters = {}
-    for i in range(len(labels)) : 
+    for i in range(len(labels)) :
       if labels[i] not in clusters :
         clusters[labels[i]] = []
       clusters[labels[i]].append(tweets.keys()[i])
- 
-    for c in clusters : 
+
+    for c in clusters :
       print(" ")
       print("cluster %s " % c)
       print("------------")
@@ -111,7 +128,7 @@ if "-process" in sys.argv :
   rt = redis.StrictRedis(host='localhost', port=6379, db=1)
   r = redis.StrictRedis(host='localhost', port=6379, db=0)
 
-  plabels = open("../sc_11_02_04").readlines()
+  plabels = open("../sc_11_02_09").readlines()
 #  plabels = open("../tclusters_info").readlines()
   l = 0
   labels = {}
@@ -132,7 +149,7 @@ if "-process" in sys.argv :
     if ar == "-h" :
       time.append(sys.argv[i])
       time.append(sys.argv[i+1])
-      
+
 
   if len(time) > 0 :
     dfrom = datetime.datetime.strptime(time[0], '%H:%M')
@@ -143,10 +160,12 @@ if "-process" in sys.argv :
   # counter
   k = 0
 
-  if "-lda" in sys.argv or "-lsi" in sys.argv : 
+  if "-lda" in sys.argv or "-lsi" in sys.argv :
     dicog = corpora.Dictionary.load("dictionary_gensim_11_08")
 
   vectorizer = feature_extraction.text.CountVectorizer()
+
+  t2u = {}
 
   # iterate tweets
   with open(filepath) as f:
@@ -163,12 +182,13 @@ if "-process" in sys.argv :
           tid = tweet[0]
           words = tweet[3].split(",")
           words = [w for w in words if w not in ["amp","ferguson",""] and not w.isdigit()]
-          if len(words) > 3 and int(labels[tweet[0]]) == 2:
+          if len(words) > 3:
             counts = Counter(words).most_common()
             vec = bow2vec(counts)
             if sum(vec) > 0 :
               if "-lda" in sys.argv or "-lsi" in sys.argv :
                 tweets[tid] = dicog.doc2bow(words)
+                t2u[tid] = tweet[2]
               else :
                 tweets[tid] = vec
         k = k + 1

@@ -56,7 +56,7 @@ testing = []
 
 print("# Training..")
 
-with open(filepath) as f:
+with open("../../data/tweets/tweets_fw_11_08_p") as f:
     for tweet in f:
       if len(dataset) <= 500 :
         tweet = re.findall('"((?:(?!(?:",")).)*)"', tweet)
@@ -65,18 +65,23 @@ with open(filepath) as f:
         tdate = datetime.time(tdate.hour,tdate.minute)
 
         if len(time) == 0 or len(time) > 0 and tdate >= dfrom and tdate <= dto :
-          words = tweet[3].split(',')
+          if "-medias" in sys.argv :
+            tokens = re.findall('"((?:(?!(?:" ")).)*)"', tweet[12])
+            tokens.extend(re.findall('"((?:(?!(?:",")).)*)"', tweet[13]))
+            print(tokens)
+          else :
+            tokens = tweet[3].split(',')
           if "-shingling" in sys.argv :
             shingleLength = 3
-            words = [" ".join(words[i:i+shingleLength]) for i in range(len(words) - shingleLength + 1)]
+            tokens = [" ".join(tokens[i:i+shingleLength]) for i in range(len(tokens) - shingleLength + 1)]
           if tweet[0] in labels :
-            dataset.append(FreqDist(words))
+            dataset.append(FreqDist(tokens))
             lab.append(labels[tweet[0]])
 
 # model
 
 def naivesBayes(classes_to_keep,classes_to_delete,labs,kf) :
-  lab2 = lab 
+  lab2 = lab
 
   classes = [l for l in [0,1,2,3] if l not in classes_to_delete]
   classes_to_merge = [l for l in classes if l not in classes_to_keep]
@@ -93,7 +98,7 @@ def naivesBayes(classes_to_keep,classes_to_delete,labs,kf) :
     cvset = [tuple((l[0],l[1])) for l in cvset if l[2] == -1]
   else :
     cvset = zip(dataset,lab2)
-  
+
   print("length dataset :")
   print(len(cvset))
 
@@ -163,7 +168,7 @@ predict = [0]*500
 
 if "-tweetcl" in sys.argv :
   print("# Classification of tweets..")
-  
+
   output = str(sys.argv[3])
 
   filepath = "../../data/tweets/tweets_fw_12_08_p"
@@ -174,7 +179,7 @@ if "-tweetcl" in sys.argv :
         if math.fmod(k,100000) == 0 :
           print(k)
         tweet = re.findall('"((?:(?!(?:",")).)*)"', tweet)
-        
+
         tdate = datetime.datetime.strptime(tweet[1], '%Y-%m-%d %H:%M:%S')
         tdate = datetime.time(tdate.hour,tdate.minute)
 
@@ -200,7 +205,7 @@ if "-usercl" in sys.argv :
         if math.fmod(k,100000) == 0 :
           print(k)
         tweet = re.findall('"((?:(?!(?:",")).)*)"', tweet)
-        
+
         tdate = datetime.datetime.strptime(tweet[1], '%Y-%m-%d %H:%M:%S')
         tdate = datetime.time(tdate.hour,tdate.minute)
 

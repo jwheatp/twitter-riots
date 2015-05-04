@@ -60,12 +60,8 @@ def clean(raw) :
     raw = rmPunct(raw)
     tokens = tokenize(raw)
     tokens = rmStops(tokens)
-    if len(tokens) > 0 and tokens[0] == "rt" :
-      isRT = True
-    else :
-      isRT = False
     tokens = rmRTs(tokens)
-    return tokens,isRT
+    return tokens
 
 def processTweet(tweet) :
   global i,outfile
@@ -82,11 +78,14 @@ def processTweet(tweet) :
   else :
     tweet[13] = 'null'
 
+  rt = re.findall(r"RT @([a-zA-Z0-9-_]*):? (.*)",tweet[3])
+  isRT = len(rt) > 0
+
   mentions = re.findall(r'@\w+', tweet[3])
   mentions = [s[1:] for s in mentions]
   mentions = ','.join(mentions)
 
-  tweet[3],isRT = clean(tweet[3])
+  tweet[3] = clean(tweet[3])
   tweet[3] = ','.join(tweet[3])
 
   tweet.insert(10,mentions)

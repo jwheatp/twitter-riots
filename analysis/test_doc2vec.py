@@ -155,11 +155,11 @@ if "-tsne" in sys.argv :
   vecs = np.asfarray(vectors, dtype='float')
 
   k_means = KMeans(10)
-  
+
   Y = tsne.tsne(vecs, 2, 50, 20.0)
 
   #db = DBSCAN(eps=1.3).fit(Y)
-  
+
   labels = k_means.labels_
   print(labels)
 
@@ -175,7 +175,7 @@ if "-tsne" in sys.argv :
     tweets[lab].append(pars[i])
     i = i + 1
 
-  for key in tweets : 
+  for key in tweets :
     print("cluster %s" % key)
     for t in tweets[key] :
       print(t)

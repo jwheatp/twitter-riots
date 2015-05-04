@@ -25,6 +25,9 @@ if len(time) > 0 :
   dto = datetime.time(dto.hour,dto.minute)
 
 k = 0
+
+past = []
+
 with open(filepath) as f:
     for tweet in f:
       if math.fmod(k,100000) == 0 :
@@ -35,26 +38,43 @@ with open(filepath) as f:
       tdate = datetime.time(tdate.hour,tdate.minute)
 
       if len(time) == 0 or len(time) > 0 and tdate >= dfrom and tdate <= dto :
-        rt = re.findall(r"RT @([a-zA-Z0-9-_]*): (.*)",tweet[3])
-        if len(rt) == 0 :
-          print(tweet[3])
+        if "-medias" in sys.argv :
+          medias = re.findall('"((?:(?!(?:" ")).)*)"', tweet[12])
+          medias.extend(re.findall('"((?:(?!(?:",")).)*)"', tweet[13]))
+          for med in medias :
+            if med not in past :
+              past.append(med)
+              print(tweet[3])
+              print(med)
 
-          label1 = raw_input("informative? \n")
-          if label1 == 'y' :
-            label1 = 1
-          elif label1 == 'n' :
-            label1 = 0
+              label = int(raw_input("garbage (0), informative (1) or involved (2) ? \n"))
 
-          label2 = raw_input("involved? \n")
-          if label2 == 'y' :
-            label2 = 1
-          elif label2 == 'n' :
-            label2 = 0
+              outline = '"%s",%s\n' % (med,label)
+              out = open(output,'a')
+              out.write(outline)
+              out.close()
+              print(" ")
+        else :
+          rt = re.findall(r"RT @([a-zA-Z0-9-_]*): (.*)",tweet[3])
+          if len(rt) == 0 :
+            print(tweet[3])
 
-          outline = '%s,"%s","%s"\n' % (tweet[0],label1,label2)
-          out = open(output,'a')
-          out.write(outline)
-          out.close()
-          print(" ")
+            label1 = raw_input("informative? \n")
+            if label1 == 'y' :
+              label1 = 1
+            elif label1 == 'n' :
+              label1 = 0
+
+            label2 = raw_input("involved? \n")
+            if label2 == 'y' :
+              label2 = 1
+            elif label2 == 'n' :
+              label2 = 0
+
+            outline = '%s,"%s","%s"\n' % (tweet[0],label1,label2)
+            out = open(output,'a')
+            out.write(outline)
+            out.close()
+            print(" ")
       k = k + 1
 

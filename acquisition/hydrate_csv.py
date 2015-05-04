@@ -36,7 +36,7 @@ def addTweet(tweet) :
 
   # date
   created_at = tweet["created_at"].encode("ASCII", 'ignore')
-  created_at = datetime.strptime(created_at, '%a %b %d %H:%M:%S +0000 %Y').strftime('%Y-%m-%d %H:%M:%S')
+comp  created_at = datetime.strptime(created_at, '%a %b %d %H:%M:%S +0000 %Y').strftime('%Y-%m-%d %H:%M:%S')
   created_at = '"%s"' % created_at
 
   # content
