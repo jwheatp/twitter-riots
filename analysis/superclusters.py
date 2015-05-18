@@ -6,36 +6,114 @@ from collections import Counter
 import datetime
 from nltk.probability import FreqDist
 from nltk.classify import SklearnClassifier
-from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.feature_extraction.text import TfidfTransformer,TfidfVectorizer,CountVectorizer
 from sklearn.feature_selection import SelectKBest, chi2
 from sklearn.naive_bayes import MultinomialNB, GaussianNB
 from sklearn.pipeline import Pipeline
 from sklearn import cross_validation
+from sklearn.svm import LinearSVC
 import numpy as np
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score,accuracy_score,precision_recall_fscore_support,classification_report
+import argparse
+
+##########################################
+## Arguments
+##########################################
+
+parser = argparse.ArgumentParser(description='Generate hashtags graphs')
+
+parser.add_argument('--filepath', dest='filepath',
+                   help='path of the tweets file')
+
+parser.add_argument('--labelspath', dest='labelspath',
+                   help='path of the labels file')
+
+parser.add_argument('--output', dest='output', default="graph_hashtags.png",
+                   help='graph output name')
+
+parser.add_argument('--time', dest='time', nargs=2,
+                   help='time window')
+
+parser.add_argument('--medias', dest='medias', action="store_true",
+                   help='medias ?')
+
+parser.add_argument('--mediaspath', dest='mediaslabelspath',
+                   help='path of the medias labels file')
+
+parser.add_argument('--shingling', dest='shingling', action="store_true",
+                   help='shingling ?')
+
+parser.add_argument('--shingLength', dest='shinglingLength', type=int,
+                   help='shingling?')
+
+parser.add_argument('--tweetcl', dest='tweetcl', type=bool, default=False,
+                   help='tweet cl?')
+
+parser.add_argument('--tweetcl_filepath', dest='tweetcl_filepath',
+                   help='path of the tweets file')
+
+parser.add_argument('--tweetcl_output', dest='tweetcl_output', default="tweetcl",
+                   help='graph output name')
+
+parser.add_argument('--usercl', dest='usercl', type=bool, default=False,
+                   help='usercl?')
+
+parser.add_argument('--usercl_filepath', dest='usercl_filepath',
+                   help='path of the tweets file')
+
+parser.add_argument('--usercl_output', dest='usercl_output', default="usercl",
+                   help='graph output name')
+
+parser.set_defaults(medias=False)
+
+parser.set_defaults(shingling=False)
+
+args = parser.parse_args()
+
+##########################################
+## Functions
+##########################################
 
 def genLabel(label_tuple) :
   return {
+        # garbage class
         (0,0): 0,
+        # informative class
         (1,0): 1,
+        # biased class
         (0,1): 2,
+        # informative and biased class
         (1,1): 3,
   }[label_tuple]
 
+##########################################
+## Data acquisition
+##########################################
 
-labelspath = str(sys.argv[1])
+# get the 500 manual labels from the 11/08 riot night
+# the labels are pairs labels (informative,biased)
+labels = open(args.labelspath).readlines()
 
-labels = open(labelspath).readlines()
+# build a <tweet_id, label> dictionary
+# the labels are 0,1,2,3 from the genLabel function
 labels = dict((l.strip().split(',')[0], genLabel(tuple(int(i) for i in l.strip().split(',')[1:3])) )for l in labels)
 
-time = []
+if args.medias : 
 
-i = 0
-for ar in sys.argv :
-  i = i + 1
-  if ar == "-h" :
-    time.append(sys.argv[i])
-    time.append(sys.argv[i+1])
+  # get the 100 medias labels from the 11/08 riot night
+  medias_labels = open(args.mediaslabelspath).readlines()
+
+  # build a <media_url, label> dictionary
+  # the labels are 1,2
+  medias_labels = dict(tuple((l.strip().split(',')[0],int(l.strip().split(',')[1]))) for l in medias_labels)
+
+  test_ml = dict(medias_labels.items()[-20:])
+  medias_labels = dict(medias_labels.items()[:80])
+
+# time window 
+time = []
+if args.time != None :
+  time = args.time
 
 if len(time) > 0 :
   dfrom = datetime.datetime.strptime(time[0], '%H:%M')
@@ -44,137 +122,229 @@ if len(time) > 0 :
   dto = datetime.datetime.strptime(time[1], '%H:%M')
   dto = datetime.time(dto.hour,dto.minute)
 
+# all the 500 labeled tweets
 dataset = []
 
+# labels
 lab = []
 
-training = []
+# input tweets file
+filepath = str(args.filepath)
 
-filepath = str(sys.argv[2])
+# shingling sizes
+shingleLength = args.shinglingLength
 
-testing = []
+print("# Acquisition..")
 
-print("# Training..")
+with open(args.filepath) as f:
 
-with open("../../data/tweets/tweets_fw_11_08_p") as f:
+    # for each tweet
     for tweet in f:
-      if len(dataset) <= 500 :
-        tweet = re.findall('"((?:(?!(?:",")).)*)"', tweet)
 
-        tdate = datetime.datetime.strptime(tweet[1], '%Y-%m-%d %H:%M:%S')
-        tdate = datetime.time(tdate.hour,tdate.minute)
+      # if we have all our tweets, we can stop
+      #if len(dataset) >= 500 :
+      #  break
 
-        if len(time) == 0 or len(time) > 0 and tdate >= dfrom and tdate <= dto :
-          if "-medias" in sys.argv :
-            tokens = re.findall('"((?:(?!(?:" ")).)*)"', tweet[12])
-            tokens.extend(re.findall('"((?:(?!(?:",")).)*)"', tweet[13]))
-            print(tokens)
-          else :
-            tokens = tweet[3].split(',')
-          if "-shingling" in sys.argv :
-            shingleLength = 3
-            tokens = [" ".join(tokens[i:i+shingleLength]) for i in range(len(tokens) - shingleLength + 1)]
-          if tweet[0] in labels :
-            dataset.append(FreqDist(tokens))
-            lab.append(labels[tweet[0]])
+      # parsing tweet
+      tweet = re.findall('"((?:(?!(?:",")).)*)"', tweet)
+
+      if tweet[8] == '1' :
+        continue
+
+      if tweet[3] == '' :
+        continue
+
+      # time process
+      tdate = datetime.datetime.strptime(tweet[1], '%Y-%m-%d %H:%M:%S')
+      tdate = datetime.time(tdate.hour,tdate.minute)
+
+      # if it is in our time window
+      if len(time) == 0 or len(time) > 0 and tdate >= dfrom and tdate <= dto :
+
+        # medias process
+        if args.medias :
+          medias = re.findall('"((?:(?!(?:" ")).)*)"', tweet[12])
+          medias.extend(re.findall('"((?:(?!(?:",")).)*)"', tweet[13]))
+          medintersec = set(medias_labels.keys()).intersection(medias)
+          medintersec2 = set(test_ml.keys()).intersection(medias)
+
+        # shingling processing ?
+        if args.shingling :
+          # get the text content
+          tokens = tweet[3].split(',')
+          # generate shinglings
+          tokens = [" ".join(tokens[i:i+shingleLength]) for i in range(len(tokens) - shingleLength + 1)]
+
+        if args.medias and medintersec and tweet[3] not in dataset :
+          medintersec = list(medintersec)[0]
+          # add bag of words to dataset
+          dataset.append(tweet[3])
+          tlab = medias_labels[medintersec]
+          lab.append(tlab)
+        elif tweet[0] in labels and not args.medias :
+          # add bag of words to dataset
+          dataset.append(tweet[3])
+          tlab = labels[tweet[0]]
+          lab.append(tlab)
+
+##########################################
+## Cross-validation training / testing
+##########################################
+
+# class pairNaiveBayes :
+
+#   def __init__(self) :
+#     self.classifier1 = SklearnClassifier(MultinomialNB())
+#     self.classifier2 = SklearnClassifier(MultinomialNB())
+
+#   def train(self,rows) :
+#     [rows,rlabels] = zip(*rows)
+#     # 1 - our classes are 0 and (1,2), so we group classes 1 and 2 to a class called -1
+#     rlabels1 = [-1 if l in (1,2) else l for l in rlabels]
+#     classes = (-1,0)
+
+#     # 2 - our <dataset,labels>
+#     dset = zip(rows,rlabels1)
+
+#     # 3 - train first classifier
+#     self.classifier1 = self.classifier1.train(dset)
+
+#     # 4 - our classes are now 1 and 2
+#     dset = zip(rows,rlabels)
+#     dset = [r for r in dset if r[1] != 0]
+
+#     # 5 - train second classifier
+#     self.classifier2 = self.classifier2.train(dset)
+
+#   def predict(self,rows) :
+#     # 1- first classifier returns 0 and -1 labels
+#     lab1 = self.classifier1.classify_many(rows)
+
+#     # 2 - select rows for second classifier
+#     rows = [r for r,l in zip(rows,lab1) if l == -1]
+
+#     # 3 - second classifier returns 1 and 2 labels
+#     lab2 = self.classifier2.classify_many(rows)
+
+#     # 4 - returns predicted labels
+#     rlabels = []
+#     k = 0
+#     for l in lab1 :
+#       if l == 0 :
+#         rlabels.append(0)
+#       else :
+#         rlabels.append(lab2[k])
+#         k += 1
+
+#     return rlabels
+
+##################################
 
 # model
+n_folds = 10
 
-def naivesBayes(classes_to_keep,classes_to_delete,labs,kf) :
-  lab2 = lab
+# initialize Multinomial Naive Bayes Classifier
+tr = CountVectorizer()
+mnb = MultinomialNB()
+classifier = Pipeline([('counts', tr),
+                     ('nb', mnb)])
 
-  classes = [l for l in [0,1,2,3] if l not in classes_to_delete]
-  classes_to_merge = [l for l in classes if l not in classes_to_keep]
-  lab2 = [l if l not in classes_to_merge else -1 for l in lab2]
+# zip tweets and labels for training/testing
+cvset = zip(dataset,lab)
+# remove class 3 rows
+cvset = [l for l in cvset if l[1] != 3]
 
-  if len(classes_to_merge) > 0 :
-    classes = classes_to_keep + [-1]
+# cross validation indexes
+cv = cross_validation.KFold(len(cvset), n_folds=n_folds, shuffle=True, random_state=None)
 
-  pipeline = Pipeline([('nb', MultinomialNB())])
-  classif = SklearnClassifier(pipeline)
+accs_d = []
+accs = []
 
-  if len(classes_to_delete) > 0 :
-    cvset = zip(dataset, lab2, labs)
-    cvset = [tuple((l[0],l[1])) for l in cvset if l[2] == -1]
-  else :
-    cvset = zip(dataset,lab2)
+accs_d_p = []
+accs_p = []
 
-  print("length dataset :")
-  print(len(cvset))
+# for each train/test set :
+for traincv, testcv in cv :
+  # given the indexes, take the rows
+  # 1) training set
+  traincv = [cvset[l] for l in traincv]
+  [traincv_data, traincv_labels] = zip(*traincv)
 
-  n_folds = kf
+  # 2) testing set (tweets)
+  testcv_data = [cvset[l][0] for l in testcv]
 
-  cv = cross_validation.KFold(len(cvset), n_folds=n_folds, shuffle=False, random_state=None)
+  # 3 ) testing set (labels)
+  testcv_labels = [cvset[l][1] for l in testcv]
 
-  accuracy = {}
-  proport = {}
-  proport_total = {}
-  cardinal = {}
+  # train the classifier
+  classifier.fit(traincv_data,traincv_labels)
+  # and predict test labels
+  test_preds = classifier.predict(testcv_data)
 
-  for k in classes :
-    accuracy[k] = []
-    proport[k] = []
-    cardinal[k] = len([l for l in cvset if l[1] == k])
-    proport_total[k] = float(cardinal[k])/float(len(cvset))
+  # compute F1 score for each class
+  accuracy = f1_score(testcv_labels,test_preds,average=None, labels=[0,1,2])
+  accs_d.append(accuracy)
 
-  for traincv, testcv in cv:
-    classifier = classif.train(cvset[traincv[0]:traincv[len(traincv)-1]])
+  # and average weighted
+  acc_average = f1_score(testcv_labels,test_preds,average="weighted", labels=[0,1,2])
+  accs.append(acc_average)
 
-    for k in classes :
-      test = [l for l in cvset[testcv[0]:testcv[len(testcv)-1]] if l[1] == k]
-      if len(test) > 0 :
-        accuracy[k].append(nltk.classify.util.accuracy(classifier, test))
-        proport[k].append(float(len(test))/cardinal[k])
+  ################################
+  ################################
 
-  total_ac = []
+  # # train the classifier
+  # classifier_p = pairNaiveBayes()
+  # classifier_p.train(traincv)
+  # # and predict test labels
+  # test_preds = classifier_p.predict(testcv_data)
 
-  for k in classes :
-    print("Class %s : " % k)
-    #print(proport_total[k])
-    mean = float(np.sum(np.multiply(proport[k],accuracy[k])))
-    print(mean)
-    total_ac.append(mean)
+  # # compute F1 score for each class
+  # accuracy = f1_score(testcv_labels,test_preds,average="samples", labels=[0,1,2])
+  # accs_d_p.append(accuracy)
 
-  print("total accuracy")
-  print(np.sum(np.multiply(total_ac, proport_total.values())))
+  # # and average weighted
+  # acc_average = f1_score(testcv_labels,test_preds,average="weighted", labels=[0,1,2])
+  # accs_p.append(acc_average)
 
-  new_labs = classif.classify_many(dataset)
-  return new_labs, classif
+accs_d = np.array(accs_d)
+accs_d = np.mean(accs_d,axis=0)
+print(accs_d)
 
-def updatePredict(predict,labs) :
-  for i in range(len(predict)) :
-    if labs[i] != -1 :
-      predict[i] = labs[i]
-  return predict
+accs = np.mean(accs)
+print(accs)
 
-# normal bayes
-[ll,classif] = naivesBayes([0,1,2],[],lab,5)
-print("-----------")
+classifier.fit(dataset,lab)
 
-predict = [0]*500
+def print_top10(vectorizer, clf, class_labels):
+    """Prints features with the highest coefficient values, per class"""
+    feature_names = vectorizer.get_feature_names()
+    for i, class_label in enumerate(class_labels):
+        top10 = np.argsort(clf.coef_[i])[-15:]
+        print("%s: %s" % (class_label,
+              " ".join(feature_names[j] for j in top10)))
 
-# pairwise bayes
-#labs = naivesBayes([0],[],lab,5)
-#predict = updatePredict(predict,labs)
-#print("-----------")
-#labs = naivesBayes([1],[0],labs,4)
-#predict = updatePredict(predict,labs)
-#print("-----------")
-#labs = naivesBayes([2],[1],labs,3)
-#predict = updatePredict(predict,labs)
-#print("###############")
+print_top10(tr,mnb,[0,1,2])
 
-#print(f1_score(labs,predict,average=None))
+# print("-------------")
 
-if "-tweetcl" in sys.argv :
+# accs_d_p = np.array(accs_d_p)
+# accs_d_p = np.mean(accs_d_p,axis=0)
+# print(accs_d_p)
+
+# accs_p = np.mean(accs_p)
+# print(accs_p)
+
+##########################################
+## Tweet classification
+##########################################
+
+if args.tweetcl :
   print("# Classification of tweets..")
 
-  output = str(sys.argv[3])
-
-  filepath = "../../data/tweets/tweets_fw_12_08_p"
+  output = args.tweetcl_output
 
   k = 0
-  with open(filepath) as f:
+  with open(args.tweetcl_filepath) as f:
       for tweet in f:
         if math.fmod(k,100000) == 0 :
           print(k)
@@ -193,14 +363,18 @@ if "-tweetcl" in sys.argv :
 
         k = k + 1
 
-if "-usercl" in sys.argv :
+##########################################
+## User classification
+##########################################
+
+if args.usercl :
 
   print("# Classification of users..")
 
   voting = {}
 
   k = 0
-  with open(filepath) as f:
+  with open(args.usercl_filepath) as f:
       for tweet in f:
         if math.fmod(k,100000) == 0 :
           print(k)
@@ -221,7 +395,7 @@ if "-usercl" in sys.argv :
 
         k = k + 1
 
-  output = str(sys.argv[3])
+  output = args.usercl_output
 
   for user in voting :
     mc = voting[user].most_common()

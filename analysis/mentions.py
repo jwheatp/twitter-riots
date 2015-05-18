@@ -34,17 +34,22 @@ r = redis.StrictRedis(host='localhost', port=6379, db=0)
 found = 0
 totalt = 0
 
+def getColor(k) :
+  """Homemade legend, returns a nice color for 0 < k < 10
+  :param k : indice
+  """
+  colors = ["#862B59","#A10000","#0A6308","#123677","#ff8100","#F28686","#6adf4f","#58ccdd","#3a3536","#00ab7c"]
+  return colors[k]
+
 # add to graph
-def addToGraph(tid,uid,tags) :
+def addToGraph(tid,uid,mentions) :
   """Process tweet to add his hashtags and user to the graphs
   :param tid : tweet id
   :param uid : user id
   :param tags : hashtags list
   """
   global G,found
-  
-  if len(tags) == 0 or len(tags) == 1 and tags[0] == '' :
-    return
+
   user = r.get(int(uid))
  
   if user == None :
@@ -53,46 +58,24 @@ def addToGraph(tid,uid,tags) :
   user = re.findall('"((?:(?!(?:",")).)*)"', user)
   
   # lower the hashtags
-  tags = [t.lower() for t in tags]
+  mentions = [t.lower() for t in mentions if t not in [""]]
   
   usern = user[1].lower()
+
   G.add_node(usern)
 
   found = found + 1
 
-  if "-tfidf" in sys.argv :
-    userId = tweet[2]
-    words = tweet[3].split(",")
-    ht = tweet[10].split(" ")
-    ht = [h.lower() for h in ht if h not in [""]]
-    mentions = tweet[11].split(",")
-    mentions = [m.lower() for m in mentions if m not in [""]]
-    words = [w for w in words if w not in ["amp","ferguson",""] and not w.isdigit()]
-    if len(words) > 0 :
-      if userId not in user2tweets :
-        user2tweets[userId] = [0,Counter(),Counter(),Counter()]
-      
-      user2tweets[userId][0] = user2tweets[userId][0]+1
-      user2tweets[userId][1].update(Counter(words))
-      user2tweets[userId][2].update(Counter(ht))
-      user2tweets[userId][3].update(Counter(mentions))
-
-      allTweetsCounter.update(Counter(Counter(words).keys()))
-      allHtagsCounter.update(Counter(Counter(ht).keys()))
-      allMentionsCounter.update(Counter(Counter(mentions).keys()))
-
-  # iterate through hashtags
-  for tag in tags :
+  # iterate through mentions
+  for m in mentions :
     # add hashtag to graph
-    G.add_node(tag)
+    G.add_node(m)
  
-    #if not rt.get(tag) :
-    #  return
     # update edge weight for every hashtag 2-permutation of the tweet
-    if G.has_edge(usern,tag) :
-      G[usern][tag]['weight'] += 1
+    if G.has_edge(usern,m) :
+      G[usern][m]['weight'] += 1
     else :
-      G.add_edge(usern, tag, weight=1)
+      G.add_edge(usern,m,weight=1)
 
 # initialize hashtag graph
 G = nx.DiGraph()
@@ -109,12 +92,6 @@ for ar in sys.argv :
   if ar == "-h" :
     time.append(sys.argv[i])
     time.append(sys.argv[i+1])
-
-if "-tfidf" in sys.argv :
-  allTweetsCounter = Counter()
-  allHtagsCounter = Counter()
-  allMentionsCounter = Counter()
-  user2tweets = {}
 
 if len(time) > 0 :
   dfrom = datetime.datetime.strptime(time[0], '%H:%M')
@@ -138,96 +115,58 @@ with open(filepath) as f:
 
       if len(time) == 0 or len(time) > 0 and tdate >= dfrom and tdate <= dto :
         totalt = totalt + 1
-        # get the hashtags
-        hashtags = tweet[11].split(",")
+        # get the mentions
+        mentions = tweet[11].split(",")
+        if tweet[8] == '1' :
+          continue
         # add to graph
-        addToGraph(tweet[0],tweet[2],hashtags)
+        if len(mentions) > 0 and mentions[0] != "" :
+          addToGraph(tweet[0],tweet[2],mentions)
       
       k = k + 1
 
 
 print("tweets found : %s over %s (%s without time consideration)" % (found,totalt,k))
 
-sg = G
-
 v = {}
 
-param = int(sys.argv[3])
+# keep the n more 
+tokeep = sorted(G.in_degree_iter(weight='weight'),key=itemgetter(1),reverse=True)[:500]
+tokeep = [t[0] for t in tokeep]
+G = G.subgraph(tokeep)
 
-if "-automatic" in sys.argv :
+UG = G.to_undirected()#
+#extract subgraphs
+sub_graphs = nx.connected_component_subgraphs(UG)
 
-  # keep the n more 
-  tokeep = sorted(G.in_degree_iter(weight='weight'),key=itemgetter(1),reverse=True)[:param]
-  tokeep = [t[0] for t in tokeep]
+subs = []
+for i, sg in enumerate(sub_graphs):
+    subs.append((sg.nodes()))
 
-  G = G.subgraph(tokeep)
+subs.sort(key = lambda s: len(s), reverse=True)
 
-  # find communities
-  partition = community.best_partition(G.to_undirected())
-  for key, value in sorted(partition.iteritems()):
-    v.setdefault(value, []).append(key)
+G = G.subgraph(subs[0])
 
-if "-tfidf" in sys.argv :
-
-  # find communities
-  v = clusters.clusterize(user2tweets, allTweetsCounter, allHtagsCounter, allMentionsCounter)
-
-if "-supervised" in sys.argv :
-    # keep the n more 
-  tokeep = sorted(G.in_degree_iter(weight='weight'),key=itemgetter(1),reverse=True)[:param]
-  tokeep = [t[0] for t in tokeep]
-
-  G = G.subgraph(tokeep)
-
-  plabels = open("uclusters_11_08_02_04").readlines()
-  l = 0
-  labels = {}
-  for l in plabels :
-    kv = l.strip().split(",")
-    uid = kv[0]
-    name =  r.get(int(uid))
-    if name == None :
-      continue
-    name = name.split(",")[1][1:-1].lower()
-    if name in G.nodes() :
-      labels[name] = kv[1]
-  
-  for key, value in sorted(labels.iteritems()):
-    v.setdefault(value, []).append(key)
+# find communities
+partition = community.best_partition(G.to_undirected())
+for key, value in sorted(partition.iteritems()):
+  v.setdefault(value, []).append(key)
 
 setofnodes = set()
 for part in v :
     setofnodes = setofnodes | set(v[part])
+#G = G.subgraph(list(setofnodes))
 
-G = G.subgraph(list(setofnodes))
-
-commN = int(sys.argv[4])
-vs = sorted(v, key=lambda k: len(v[k]), reverse=True)[:commN]
+vs = sorted(v, key=lambda k: len(v[k]), reverse=True)[:3]
 v = dict(filter(lambda i:i[0] in vs, v.iteritems()))
 
-def getColor(k) :
-  """Homemade legend, returns a nice color for 0 < k < 10
-  :param k : indice
-  """
-  colors = ["#862B59","#A10000","#0A6308","#123677","#ff8100","#F28686","#6adf4f","#58ccdd","#3a3536","#00ab7c"]
-  return colors[k]
-  #r = lambda: random.randint(0,255)
-  #return('#%02X%02X%02X' % (r(),r(),r()))
-
 print("now create layout..")
-
-d = sg.in_degree(G.nodes()).items()
-d = sorted(d,key = lambda e : e[1],reverse=True)
-
-gdeg = G.degree()
-to_remove = [n for n in gdeg if gdeg[n] == 0]
-G.remove_nodes_from(to_remove)
 
 pos = nx.graphviz_layout(G,prog="sfdp")
 
 print("layout done !")
 
-node_size=[nn[1] * 1 for nn in d]
+#node_size=[nn[1] * 1 for nn in G.degree()]
 
 labels = {}
 ###################################
@@ -247,54 +186,15 @@ for part in v :
       labels[str(x)] = str(x)
 
     ledges = T.edges()
-    caption = " ".join(np[:10])
     
     d = T.in_degree().items()
     d = sorted(d,key = lambda e : e[1],reverse=True)
     node_size=[ee[1] for ee in d]
 
-    nx.draw_networkx_nodes(T,pos,np, node_size=1, node_color = str(getColor(i)),linewidths=0, label=caption, with_labels=True,font_size=6)
+    nx.draw_networkx_nodes(T,pos,np, node_size=1, node_color = str(getColor(i)),linewidths=0, font_size=6)
     nx.draw_networkx_edges(T,pos,edgelist=ledges,edge_color=str(getColor(i)),arrows=True,alpha=0.4)
-    #edge_labels=dict([((uu,vv,),dd['weight']) for uu,vv,dd in T.edges(data=True)])
-    #nx.draw_networkx_edge_labels(T,pos,edge_labels=edge_labels,color=str(getColor(i)))
+
     i = i + 1
 
-#nx.draw_networkx_labels(G,pos,labels,font_size=6)
-
-plt.legend(prop={'size':6})
 plt.savefig("graph.png",dpi=200)
 
-###################################################
-
-if "-complete" in sys.argv :
-
-  top_rt = open(str(sys.argv[2])).readlines()
-  top_rt = [l.strip() for l in top_rt]
-  top_rt = [re.findall('"((?:(?!(?:",")).)*)"', t) for t in top_rt]
-
-  rts = {}
-
-  print("---")
-
-  k = 0
-  for i in v :
-    rts[k] = []
-    for u in v[i] :
-      uid = rt.get(u.lower())
-      if uid != None :
-        for tw in top_rt :
-          if tw[2] == str(uid) :
-            rts[k].append(tw)
-    rts[k].sort(key=lambda x: int(x[4]), reverse=True)
-    rts[k] = rts[k][:100]
-    print("top tweets")
-    print("---------------")
-    for tt in rts[k][:10] :
-      print(tt)
-    print("random sample")
-    print("---------------")
-    print("----------------")
-    print("----------------")
-    k = k + 1
-
-  correlations(rts)

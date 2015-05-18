@@ -17,6 +17,7 @@ import string
 import numpy as np
 import matplotlib.patheffects as PathEffects
 import math
+import pickle
 import Image
 import community
 import itertools
@@ -28,8 +29,41 @@ import random
 from correlations import correlations
 import clusters
 
+def reduceEdges(S,param) :
+  """Reduce edges, returns graph with top n edges
+  :param S : graph
+  :param param: number of edges to keep
+  """
+  # save old edges
+  old_edges = S.edges()
+
+  # take top edges
+  edges = sorted(S.edges(data = True), key = lambda (a, b, dct): dct['weight'],reverse=True)[:param]
+
+  # update graph edges
+  S.remove_edges_from(old_edges)
+  S.add_edges_from(edges)
+
+  # clean graph by removing degree-0 nodes
+  deg = S.degree()
+  to_remove = [n for n in deg if deg[n] == 0]
+  S.remove_nodes_from(to_remove)
+  return S
+
+def removeUnitEdges(S) :
+  # save old edges
+  old_edges = S.edges()
+
+  # take top edges
+  edges = [e for e in S.edges(data = True) if e[2]['weight'] <= 1]
+
+  # update graph edges
+  S.remove_edges_from(edges)
+
+  return S
+
 # add to graph
-def addToGraph(uname,rtname,omessage) :
+def addToGraph(uname,rtname) :
   """Process tweet to add his hashtags and user to the graphs
   :param tid : tweet id
   :param uid : user id
@@ -37,18 +71,13 @@ def addToGraph(uname,rtname,omessage) :
   """
   global G,found
 
+  if rtname == '' :
+    return
+
   # lower the rt username
   rtname = rtname.lower()
 
   user = uname
-#  if user not in labels :
-#    return
-
-#  if rtname in ["michaelskolnik","antoniofrench"] :
-#    return
-
-  #if labels[user] == '0' or labels[rtname] == '0' :
-  #  return
 
   twtCtn[user] += 1
 
@@ -57,10 +86,10 @@ def addToGraph(uname,rtname,omessage) :
   G.add_node(rtname)
 
   # create edge or update weights
-  if G.has_edge(rtname,user) :
-    G[rtname][user]['weight'] += 1
+  if G.has_edge(user,rtname) :
+    G[user][rtname]['weight'] += 1
   else :
-    G.add_edge(rtname, user, weight=1)
+    G.add_edge(user, rtname, weight=1)
 
 # redis connection
 rtc = redis.StrictRedis(host='localhost', port=6379, db=1)
@@ -72,44 +101,8 @@ totalt = 0
 twtCtn = Counter()
 users2tweets = {}
 
-
-dmedias = ["https://vine.co/v/MVQVuYnp6Xv","http://pbs.twimg.com/media/BusiX1GIgAAgJ7M.jpg","http://bit.ly/1mB52fg","http://www.youtube.com/watch?v=FJt7gNi3Nr4&sns=tw","http://tinyurl.com/qxse8o6","http://twitter.com/ShaunKing/status/498287589749563392/photo/1","https://m.youtube.com/watch?v=eOSRQ-c1XW0","http://bit.ly/1pKb54U","http://fb.me/6KMplQcZa","http://m.stltoday.com/news/local/crime-and-courts/fatal-shooting-by-ferguson-police-draws-angry-crowd/article_04e3885b-4131-5e49-b784-33cd3acbe7f1.html?mobile_touch=true"]
-
-
 # initialize hashtag graph
 G = nx.DiGraph()
-
-if "-classify" in sys.argv :
-    # keep the n more
-  #tokeep = sorted(G.in_degree_iter(weight='weight'),key=itemgetter(1),reverse=True)[:param]
-  #tokeep = [t[0] for t in tokeep]
-
-  #G = G.subgraph(tokeep)
-
-  # get labels
-  plabels = open("../scu_11_02_04").readlines()
-  l = 0
-  labels = {}
-  for l in plabels :
-    kv = l.strip().split(",")
-    uid = kv[0]
-    name =  r.get(int(uid))
-    if name == None :
-      continue
-    name = name.split(",")[1][1:-1].lower()
-    labels[name] = kv[1]
-
-plabels = open("topiclusters_11").readlines()
-l = 0
-labels = {}
-for l in plabels :
-  kv = l.strip().split(",")
-  uid = kv[0]
-  name =  r.get(int(uid))
-  if name == None :
-    continue
-  name = name.split(",")[1][1:-1].lower()
-  labels[name] = kv[1]
 
 # input tweets
 filepath = str(sys.argv[1])
@@ -129,6 +122,18 @@ if len(time) > 0 :
   dto = datetime.datetime.strptime(time[1], '%H:%M')
   dto = datetime.time(dto.hour,dto.minute)
 
+polars = pickle.Unpickler(open("types_11", "r")).load()
+knames = set(polars.keys())
+
+for p in polars :
+  if polars[p] < -0.5 :
+    polars[p] = 1
+  elif polars[p] >= -0.5 and polars[p] <= 0.5 :
+    polars[p] = 2
+  else :
+    polars[p] = 3
+
+print(Counter(polars.values()))
 
 # counter
 k = 0
@@ -150,9 +155,9 @@ with open(filepath) as f:
       if len(time) == 0 or len(time) > 0 and tdate >= dfrom and tdate <= dto :
 
         # check if it is an RT
-        rt = re.findall(r"RT @([a-zA-Z0-9-_]*):? (.*)",tweet[3])
 
-        if len(rt) > 0 :
+        if tweet[8] == '1' :
+
           # get tweet author infos from redis
           user = r.get(int(tweet[2]))
           # if not in database, quit
@@ -162,118 +167,79 @@ with open(filepath) as f:
           user = re.findall('"((?:(?!(?:",")).)*)"', user)
           user = user[1].lower()
 
-          medias = re.findall('"((?:(?!(?:" ")).)*)"', tweet[12])
-          medias.extend(re.findall('"((?:(?!(?:",")).)*)"', tweet[13]))
-
-          for med in medias :
-            if med in dmedias :
-              labels[user] = 4
-
-          rt = rt[0]
+          rtname = tweet[11].split(',')[0]
           found += 1
+
           # add to graph
-          addToGraph(user,rt[0],rt[1])
+          addToGraph(user,rtname)
 
       k = k + 1
 
 # number of results considering the time window
-print("%s results." % found)
+print("%s results." % len(G.nodes()))
 
-sg = G
+#G = G.subgraph(knames)
 
-#twtCtn = Counter(el for el in twtCtn.elements() if twtCtn[el] >= 2)
-#G = G.subgraph(twtCtn.keys())
+polarsC1 = [n for n in polars if polars[n] == 1]
+polarsC2 = [n for n in polars if polars[n] == 2]
+polarsC3 = [n for n in polars if polars[n] == 3]
+
+G1 = G.subgraph(polarsC1)
+G2 = G.subgraph(polarsC2)
+G3 = G.subgraph(polarsC3)
+
+centers1 = nx.pagerank(G1)
+centers1 = sorted(centers1.items(),key=itemgetter(1),reverse=True)
+centers1 = [t[0] for t in centers1]
+centers1 = centers1[:1000]
+
+centers2 = nx.pagerank(G2)
+centers2 = sorted(centers2.items(),key=itemgetter(1),reverse=True)
+centers2 = [t[0] for t in centers2]
+centers2 = centers2[:1000]
+
+centers3 = nx.pagerank(G3)
+centers3 = sorted(centers3.items(),key=itemgetter(1),reverse=True)
+centers3 = [t[0] for t in centers3]
+centers3 = centers3[:1000]
+
+centers = set(centers1 + centers2 + centers3)
+
+G = G.subgraph(centers)
 
 if "-unit" in sys.argv :
+  unitN = 1
   # for each node keep the most influent predecessor
   for node in G.nodes() :
-    allnodes = G.predecessors(node)
-
-    edges = G.in_edges([node],data=True)
+    allnodes = G.successors(node)
+    edges = G.out_edges([node],data=True)
     first = set()
     if len(edges) > 0 :
-      edges = sorted(edges, key = lambda e : e[2]['weight'])
-      first = set([edges[0][0]])
+      edges = sorted(edges, key = lambda e : e[2]['weight'], reverse=True)
+      first = set([e[1] for e in edges[:unitN]])
     toremove = set(allnodes) - first
-    toremove = [(t,node) for t in toremove]
+    toremove = [(node,t) for t in toremove]
     G.remove_edges_from(toremove)
 
 def getColor(k) :
   """Homemade legend, returns a nice color for 0 < k < 10
   :param k : indice
   """
-  colors = ["#CCCCCC","#862B59","#0A6308","#A10000","#123677","#ff8100","#F28686","#6adf4f","#58ccdd","#3a3536"]
+  colors = ["#862B59","#A10000","#0A6308","#123677","#ff8100","#F28686","#6adf4f","#58ccdd","#3a3536","#00ab7"]
   return colors[k]
-
-
-###########
-
-#gdeg = G.degree()
-#to_remove = [n for n in gdeg if gdeg[n] == 0]
-#G.remove_nodes_from(to_remove)
-
-########
-
-#centers = nx.pagerank(G)
-#centers = sorted(list(centers),key=itemgetter(1),reverse=True)[:20]
-
-#print(centers)
-
-########
-
-#centers = nx.out_degree_centrality(G)
-#centers = sorted(centers,key=itemgetter(1),reverse=True)[:20]
-
-########
 
 def plotGraph(G,k) :
   print("now create layout..")
+
+  print(len(G.nodes()))
+  colors = [getColor(int(polars[n])) if n in polars else '#cccccc' for n in G.nodes()]
 
   pos = nx.graphviz_layout(G,prog="sfdp")
 
   print("layout done !")
 
-  centers = ["michaelskolnik",'antoniofrench',"pzfeed","pdpj","youranonnews","khaledbeydoun","womenonthemove1"]
-  colors = []
-  for node in G.nodes() :
-    if node in labels :
-      c = getColor(int(labels[node]))
-    else :
-      c = "#000000"
-    colors.append(c)
-
-  clabels = {}
-  for x in G.nodes() :
-    clabels[str(x)] = str(x)
-
   plt.clf()
-  nx.draw(G,pos, linewidths=0, node_size = 5, with_labels = False, alpha = 0.5,font_size = 6, node_color=colors, edge_color='#cccccc',arrows=True)
-
-  topnodes = sorted(G.degree_iter(),key=itemgetter(1),reverse=True)[:50]
-  topnodes = [t[0] for t in topnodes]
-
-  ax = plt.gca()
-  for lb in topnodes :
-    if lb in centers :
-      ltxt = "%s*" % clabels[lb]
-      lcol = "#C4272A"
-      lsize = 8
-    elif lb in labels and int(labels[lb]) == 2 :
-      ltxt = clabels[lb]
-      lcol = "#2A962C"
-      lsize = 6
-    elif lb in labels and int(labels[lb]) == 4 :
-      ltxt = clabels[lb]
-      lcol = "#ff8100"
-      lsize = 6
-    else :
-      ltxt = clabels[lb]
-      lcol = "#000000"
-      lsize = 6
-    txt = ax.text(pos[lb][0], pos[lb][1], ltxt,fontsize=lsize, color=lcol, ha= 'center')
-    txt.set_path_effects([PathEffects.Stroke(linewidth=2, alpha = 0.8, foreground="w"), PathEffects.Normal()])
-
-  #nx.draw_networkx_labels(G,pos,clabels,font_size=6)
+  nx.draw(G,pos, linewidths=0, node_size = 10, with_labels = False, alpha = 0.6,font_size = 6, node_color=colors, edge_color="#cccccc",arrows=True)
 
   plt.legend(prop={'size':6})
   plt.savefig("graph_%s.png" % k,dpi=200)
@@ -288,6 +254,6 @@ for i, sg in enumerate(sub_graphs):
 
 subs.sort(key = lambda s: len(s), reverse=True)
 
-for i in range(5) :
+for i in range(1) :
   fg = subs[i]
   plotGraph(G.subgraph(fg),i)
